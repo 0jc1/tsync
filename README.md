@@ -1,2 +1,2 @@
 # tsync
-simple cross-platform file synchronization tool
+simple cross-platform file synchronization tool in Go

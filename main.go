@@ -1,109 +1,126 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
+	"io"
 )
 
-// FileInfo stores metadata about a file for comparison
-type FileInfo struct {
-	Path    string
-	Size    int64
-	ModTime int64
-	IsDir   bool
-}
-
-type FileInfoMap map[string]FileInfo
-
-// scanDirectory recursively walks directory and returns file metadata
-func scanDirectory(dir string) (FileInfoMap, error) {
-	files := make(FileInfoMap)
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			fmt.Printf("Error accessing path %s: %v\n", path, err)
-			return err
-		}
-		// Store relative path as key
-		relPath, _ := filepath.Rel(dir, path)
-		files[relPath] = FileInfo{
-			Path:    relPath,
-			Size:    info.Size(),
-			ModTime: info.ModTime().Unix(),
-			IsDir:   info.IsDir(),
-		}
-		return nil
-	})
-	return files, err
-}
-
-// detectChanges compares old and new file states
-func detectChanges(oldFiles, newFiles FileInfoMap) {
-	// Detect added files
-	for path := range newFiles {
-		if _, exists := oldFiles[path]; !exists {
-			fmt.Printf("[ADDED] %s\n", path)
-		}
-	}
-
-	// Detect removed files
-	for path := range oldFiles {
-		if _, exists := newFiles[path]; !exists {
-			fmt.Printf("[REMOVED] %s\n", path)
-		}
-	}
-
-	// Detect modified files (size or time changed)
-	for path, newInfo := range newFiles {
-		if oldInfo, exists := oldFiles[path]; exists && path != "." {
-			if oldInfo.Size != newInfo.Size || oldInfo.ModTime != newInfo.ModTime {
-				fmt.Printf("[MODIFIED] %s\n", path)
-			}
-		}
-	}
-}
 
 func main() {
+    pid := os.Getpid()
+    fmt.Println("Process ID:", pid)
+
+	var loopDelay time.Duration = 1000*time.Millisecond
+
 	var args []string = os.Args
-	if len(args) < 2 {
-		fmt.Println("Usage: main <directory>")
+	if len(args) < 3 {
+		fmt.Println("Usage: main <source> <dest>")
 		return
 	}
 
-	var dir string = args[1]
-	var snapshotFile string = "data.txt"
+	var source string = args[1]
+	var dest string = args[2]
 
-	// Get current directory state
-	start := time.Now()
-	newFiles, err := scanDirectory(dir)
-	elapsed := time.Since(start)
-	if err != nil {
-		fmt.Printf("Error scanning directory: %v\n", err)
-		return
+    fmt.Printf("Source: %s\n", source)
+    fmt.Printf("Destination: %s\n", dest)
+
+	
+	info, err := os.Stat(source)
+	if os.IsNotExist(err) {
+		fmt.Println("source does not exist.", err.Error())
+		os.Exit(1)
 	}
-	fmt.Printf("Scan completed in %.2fs\n", elapsed.Seconds())
 
-	// Read previous snapshot if exists
-	var oldFiles map[string]FileInfo
-	data, err := os.ReadFile(snapshotFile)
 	if err == nil {
-		json.Unmarshal(data, &oldFiles)
-		detectChanges(oldFiles, newFiles)
-	} else {
-		fmt.Println("First scan - no previous snapshot")
+		fmt.Println("source file")
+		fmt.Println("bytes: ", info.Size())    // bytes
+		fmt.Println("mod time: " + info.ModTime().Format(time.DateTime)) // time.Time
+		fmt.Println("is dir: ", info.IsDir())   // bool
+		fmt.Println("mode: ", info.Mode())    // os.FileMode
+		fmt.Println()
+	}
+	
+	info1, err1 := os.Stat(dest)
+
+	if os.IsNotExist(err1) {
+		fmt.Println("dest does not exist")
+		os.Exit(1)
 	}
 
-	// Calculate total size
-	var totalSize int64
-	for _, file := range newFiles {
-		totalSize += file.Size
+	if err1 == nil {
+		fmt.Println("dest file")
+		fmt.Println("bytes: ", info1.Size())    // bytes
+		fmt.Println("mod time: " + info1.ModTime().Format(time.DateTime)) // time.Time
+		fmt.Println("is dir: ", info1.IsDir())   // bool
+		fmt.Println("mode: ", info1.Mode())    // os.FileMode
+		fmt.Println()
 	}
-	totalMB := float64(totalSize) / (1024 * 1024)
+	
 
-	// Save current snapshot
-	snapshot, _ := json.MarshalIndent(newFiles, "", "  ")
-	os.WriteFile(snapshotFile, snapshot, 0644)
-	fmt.Printf("Snapshot saved to data.txt\nTotal size: %.2f MB\n", totalMB)
+
+	// file watch & update loop
+
+	lastModTime := info.ModTime()
+
+	for {
+		time.Sleep(loopDelay)
+		currTime := time.Now().UnixMilli()
+
+		stat, err := os.Stat(source)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+
+		if stat.ModTime().After(lastModTime) {
+			lastModTime = stat.ModTime()
+			fmt.Printf("source file modified at %s\n", lastModTime)
+
+			fmt.Println("copying source to dest")
+
+			sourceFile, err := os.Open(source)
+
+			if err != nil {
+				fmt.Println(err.Error())
+			}
+
+			destinationFile, err := os.Create(dest)
+			if err != nil {
+				fmt.Println(err.Error())
+			}
+
+		    _, err = io.Copy(destinationFile, sourceFile)
+
+			if err != nil {
+				fmt.Println(err.Error())
+			}
+			
+			if sourceFile != nil {
+				sourceFile.Close()
+			}
+			if destinationFile != nil {
+				destinationFile.Close()
+			}
+		}
+		
+
+		elapsedTime := time.Now().UnixMilli() - currTime
+		fmt.Println("elapsedTime ", elapsedTime, " ms")
+		//fmt.Println()
+	}
+
+
+
+	// i want to take the paths of all the files and keep them sync'd
+
+	// on file update - sync all other files
+	// on file lost or undetected - try to sync with the last modified file
+
+	// add code for persistance 
+
+	// read from a file to get the file paths
+	// output logs 
+
 }
