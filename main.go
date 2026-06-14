@@ -42,7 +42,7 @@ func main() {
 		fmt.Println()
 	}
 	
-	info1, err1 := os.Stat(dest)
+	destInfo, err1 := os.Stat(dest)
 
 	if os.IsNotExist(err1) {
 		fmt.Println("dest does not exist")
@@ -51,10 +51,10 @@ func main() {
 
 	if err1 == nil {
 		fmt.Println("dest file")
-		fmt.Println("bytes: ", info1.Size())    // bytes
-		fmt.Println("mod time: " + info1.ModTime().Format(time.DateTime)) // time.Time
-		fmt.Println("is dir: ", info1.IsDir())   // bool
-		fmt.Println("mode: ", info1.Mode())    // os.FileMode
+		fmt.Println("bytes: ", destInfo.Size())    // bytes
+		fmt.Println("mod time: " + destInfo.ModTime().Format(time.DateTime)) // time.Time
+		fmt.Println("is dir: ", destInfo.IsDir())   // bool
+		fmt.Println("mode: ", destInfo.Mode())    // os.FileMode
 		fmt.Println()
 	}
 	
@@ -62,7 +62,7 @@ func main() {
 
 	// file watch & update loop
 
-	lastModTime := info.ModTime()
+	lastModTime := destInfo.ModTime()
 
 	for {
 		time.Sleep(loopDelay)
@@ -75,8 +75,7 @@ func main() {
 		}
 
 		if stat.ModTime().After(lastModTime) {
-			lastModTime = stat.ModTime()
-			fmt.Printf("source file modified at %s\n", lastModTime)
+			fmt.Printf("source file modified after dest")
 
 			fmt.Println("copying source to dest")
 
@@ -91,12 +90,19 @@ func main() {
 				fmt.Println(err.Error())
 			}
 
+			destInfo, err := destinationFile.Stat()
+			if err != nil {
+				fmt.Println(err.Error())
+			}
+
 		    _, err = io.Copy(destinationFile, sourceFile)
 
 			if err != nil {
 				fmt.Println(err.Error())
+			} else {
+				lastModTime = destInfo.ModTime()
 			}
-			
+
 			if sourceFile != nil {
 				sourceFile.Close()
 			}
@@ -108,19 +114,15 @@ func main() {
 
 		elapsedTime := time.Now().UnixMilli() - currTime
 		fmt.Println("elapsedTime ", elapsedTime, " ms")
-		//fmt.Println()
 	}
-
-
 
 	// i want to take the paths of all the files and keep them sync'd
 
 	// on file update - sync all other files
 	// on file lost or undetected - try to sync with the last modified file
 
-	// add code for persistance 
+	// add code for persistence
 
 	// read from a file to get the file paths
 	// output logs 
-
 }
