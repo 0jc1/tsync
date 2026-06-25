@@ -1,128 +1,136 @@
+// Example of a daemon with echo service
 package main
 
 import (
 	"fmt"
+	"log"
+	"net"
 	"os"
-	"time"
-	"io"
+	"os/signal"
+	"syscall"
+
+	"github.com/takama/daemon"
 )
 
+const (
 
-func main() {
-    pid := os.Getpid()
-    fmt.Println("Process ID:", pid)
+	// name of the service
+	name        = "myservice"
+	description = "My Echo Service"
 
-	var loopDelay time.Duration = 1000*time.Millisecond
+	// port which daemon should be listen
+	port = ":9977"
+)
 
-	var args []string = os.Args
-	if len(args) < 3 {
-		fmt.Println("Usage: main <source> <dest>")
-		return
+// dependencies that are NOT required by the service, but might be used
+var dependencies = []string{"dummy.service"}
+
+var stdlog, errlog *log.Logger
+
+// Service has embedded daemon
+type Service struct {
+	daemon.Daemon
+}
+
+// Manage by daemon commands or run the daemon
+func (service *Service) Manage() (string, error) {
+
+	usage := "Usage: myservice install | remove | start | stop | status"
+
+	// if received any kind of command, do it
+	if len(os.Args) > 1 {
+		command := os.Args[1]
+		switch command {
+		case "install":
+			return service.Install()
+		case "remove":
+			return service.Remove()
+		case "start":
+			return service.Start()
+		case "stop":
+			return service.Stop()
+		case "status":
+			return service.Status()
+		default:
+			return usage, nil
+		}
 	}
 
-	var source string = args[1]
-	var dest string = args[2]
+	// Do something, call your goroutines, etc
 
-    fmt.Printf("Source: %s\n", source)
-    fmt.Printf("Destination: %s\n", dest)
+	// Set up channel on which to send signal notifications.
+	// We must use a buffered channel or risk missing the signal
+	// if we're not ready to receive when the signal is sent.
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt, os.Kill, syscall.SIGTERM)
 
-	
-	info, err := os.Stat(source)
-	if os.IsNotExist(err) {
-		fmt.Println("source does not exist.", err.Error())
-		os.Exit(1)
+	// Set up listener for defined host and port
+	listener, err := net.Listen("tcp", port)
+	if err != nil {
+		return "Possibly was a problem with the port binding", err
 	}
 
-	if err == nil {
-		fmt.Println("source file")
-		fmt.Println("bytes: ", info.Size())    // bytes
-		fmt.Println("mod time: " + info.ModTime().Format(time.DateTime)) // time.Time
-		fmt.Println("is dir: ", info.IsDir())   // bool
-		fmt.Println("mode: ", info.Mode())    // os.FileMode
-		fmt.Println()
-	}
-	
-	destInfo, err1 := os.Stat(dest)
+	// set up channel on which to send accepted connections
+	listen := make(chan net.Conn, 100)
+	go acceptConnection(listener, listen)
 
-	if os.IsNotExist(err1) {
-		fmt.Println("dest does not exist")
-		os.Exit(1)
-	}
-
-	if err1 == nil {
-		fmt.Println("dest file")
-		fmt.Println("bytes: ", destInfo.Size())    // bytes
-		fmt.Println("mod time: " + destInfo.ModTime().Format(time.DateTime)) // time.Time
-		fmt.Println("is dir: ", destInfo.IsDir())   // bool
-		fmt.Println("mode: ", destInfo.Mode())    // os.FileMode
-		fmt.Println()
-	}
-	
-
-
-	// file watch & update loop
-
-	lastModTime := destInfo.ModTime()
-
+	// loop work cycle with accept connections or interrupt
+	// by system signal
 	for {
-		time.Sleep(loopDelay)
-		currTime := time.Now().UnixMilli()
+		select {
+		case conn := <-listen:
+			go handleClient(conn)
+		case killSignal := <-interrupt:
+			stdlog.Println("Got signal:", killSignal)
+			stdlog.Println("Stoping listening on ", listener.Addr())
+			listener.Close()
+			if killSignal == os.Interrupt {
+				return "Daemon was interrupted by system signal", nil
+			}
+			return "Daemon was killed", nil
+		}
+	}
+}
 
-		stat, err := os.Stat(source)
+// Accept a client connection and collect it in a channel
+func acceptConnection(listener net.Listener, listen chan<- net.Conn) {
+	for {
+		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Println(err)
 			continue
 		}
-
-		if stat.ModTime().After(lastModTime) {
-			fmt.Printf("source file modified after dest")
-
-			fmt.Println("copying source to dest")
-
-			sourceFile, err := os.Open(source)
-
-			if err != nil {
-				fmt.Println(err.Error())
-			}
-
-			destinationFile, err := os.Create(dest)
-			if err != nil {
-				fmt.Println(err.Error())
-			}
-
-			destInfo, err := destinationFile.Stat()
-			if err != nil {
-				fmt.Println(err.Error())
-			}
-
-		    _, err = io.Copy(destinationFile, sourceFile)
-
-			if err != nil {
-				fmt.Println(err.Error())
-			} else {
-				lastModTime = destInfo.ModTime()
-			}
-
-			if sourceFile != nil {
-				sourceFile.Close()
-			}
-			if destinationFile != nil {
-				destinationFile.Close()
-			}
-		}
-		
-
-		elapsedTime := time.Now().UnixMilli() - currTime
-		fmt.Println("elapsedTime ", elapsedTime, " ms")
+		listen <- conn
 	}
+}
 
-	// i want to take the paths of all the files and keep them sync'd
+func handleClient(client net.Conn) {
+	for {
+		buf := make([]byte, 4096)
+		numbytes, err := client.Read(buf)
+		if numbytes == 0 || err != nil {
+			return
+		}
+		client.Write(buf[:numbytes])
+	}
+}
 
-	// on file update - sync all other files
-	// on file lost or undetected - try to sync with the last modified file
+func init() {
+	stdlog = log.New(os.Stdout, "", 0)
+	errlog = log.New(os.Stderr, "", 0)
+}
 
-	// add code for persistence
+func main() {
+	srv, err := daemon.New(name, description, daemon.SystemDaemon, dependencies...)
+	if err != nil {
+		errlog.Println("Error: ", err)
+		os.Exit(1)
+	}
+	service := &Service{srv}
+	status, err := service.Manage()
+	if err != nil {
+		errlog.Println(status, "\nError: ", err)
+		os.Exit(1)
+	}
+	fmt.Println(status)
 
-	// read from a file to get the file paths
-	// output logs 
 }
