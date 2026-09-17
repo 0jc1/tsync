@@ -7,10 +7,12 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
+	"github.com/getlantern/systray"
 )
 
 
@@ -146,6 +148,8 @@ func main() {
 	fmt.Println("Program", args[0])
 	fmt.Println("Args:", args[1:])
 
+	systray.Run(onReady, onExit)
+
 	var wg sync.WaitGroup
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -173,4 +177,35 @@ func main() {
 		}
 		wg.Wait()
 	}
+}
+
+func onReady() {
+	//systray.SetIcon(icon.Data)
+	systray.SetTitle("tsync")
+	systray.SetTooltip("")
+	mOpenConfig := systray.AddMenuItem("Open Configuration", "Open")
+	mQuitOrig := systray.AddMenuItem("Quit", "Quit the whole app")
+	go func() {
+		<-mQuitOrig.ClickedCh
+		fmt.Println("Requesting quit")
+		systray.Quit()
+		fmt.Println("Finished quitting")
+	}()
+
+	go func ()  {
+		<-mOpenConfig.ClickedCh
+		openInDefaultEditor("config.json")
+	}()
+
+	// Sets the icon of a menu item. Only available on Mac and Windows.
+	//mQuit.SetIcon(icon.Data)
+}
+
+func onExit() {
+	// clean up here
+}
+
+func openInDefaultEditor(path string) error {
+	cmd := exec.Command("open", "-t", "-W", path)
+	return cmd.Run() // -W blocks until the app quits
 }
