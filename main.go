@@ -4,12 +4,13 @@ import (
 	//	"fmt
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
-	"time"
-	"io"
 	"path/filepath"
 	"runtime"
+	"sync"
+	"time"
 )
 
 
@@ -43,17 +44,18 @@ func trace() {
     log.Printf("reached %s:%d", filepath.Base(file), line)
 }
 
-func Sync(fg FileGroup) {
+func Sync(fg FileGroup, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	var files []*os.File
 	policy := fg.Policy
 	source, err := os.OpenFile(fg.Source, os.O_RDWR, 0644)
-	
+
 	var newestFile *os.File
 	var newestModTime time.Time
 	
 	if err != nil && policy == "source_wins" {
-		fmt.Println(err)
-		fmt.Println("Cannot sync file group without source")
+		fmt.Println("Cannot sync file group without source", err)
 		trace()
 		return
 	} 
@@ -144,6 +146,7 @@ func main() {
 	fmt.Println("Program", args[0])
 	fmt.Println("Args:", args[1:])
 
+	var wg sync.WaitGroup
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
@@ -165,8 +168,9 @@ func main() {
 				fmt.Println("Invalid group: No file_paths in group")
 				continue
 			}
-
-			go Sync(group)
+			wg.Add(1)
+			go Sync(group, &wg)
 		}
+		wg.Wait()
 	}
 }
