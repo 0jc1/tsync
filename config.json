@@ -1,14 +1,12 @@
 {
-    "refresh_interval": 60,
+    "refresh_interval": 1,
     "file_groups": [
         {
-            "source_file_path": "test.txt",
+            "source_file_path": "test1.txt",
             "file_paths": [
-                "/e/et/ese/test.txt",
-                "/e/tesfesfess/test.txt"
+                "test2.txt"
             ],
-            "policy": "newest_wins"
-        },
-        {}
+            "policy": "source_wins"
+        }
     ]
 }

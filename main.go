@@ -4,8 +4,12 @@ import (
 	//	"fmt
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"time"
+	"io"
+	"path/filepath"
+	"runtime"
 )
 
 
@@ -34,11 +38,73 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+func trace() {
+    _, file, line, _ := runtime.Caller(1)
+    log.Printf("reached %s:%d", filepath.Base(file), line)
+}
+
 func Sync(fg FileGroup) {
+	var files []*os.File
+	policy := fg.Policy
+	source, err := os.OpenFile(fg.Source, os.O_RDWR, 0644)
 	
-	for i, file_path := range fg.Files {
-		fmt.Println(i, file_path)
+	if err != nil  {
+		fmt.Println(err)
+		fmt.Println("Cannot sync file group without source")
+		trace()
+		return
+	} 
+
+	for _, file_path := range fg.Files {
+		file, err := os.OpenFile(file_path, os.O_RDWR,0644)
+		if err != nil {
+			log.Println("err", err)
+			trace()
+		}
+		files = append(files, file)
 	}
+
+	if policy == "source_wins" {
+		source_info, err := source.Stat()
+		if err != nil {
+			fmt.Println(err)
+			trace()
+			return
+		}
+
+		for _, file := range files {
+			info, err := file.Stat()
+			if err != nil {
+				file.Close()
+				fmt.Println(err)
+				trace()
+				continue
+			}
+
+			if info.Size() != source_info.Size() {
+				source.Seek(0, io.SeekStart)
+				//clear file
+				file.Truncate(0)
+				_, err := io.Copy(file, source)
+				if err != nil {
+					fmt.Println(err)
+					trace()
+				} else {
+					fmt.Println("copied")
+				}
+			}
+
+			// if info.ModTime().Before(source_info.ModTime()) {
+			// 	fmt.Printf("%s modtime before source\n", file.Name())
+			// } 
+
+			file.Close()
+		}
+		source.Close()
+	} else if policy == "newest_wins" {
+
+	}
+	
 }
 
 func main() {
@@ -63,6 +129,8 @@ func main() {
 		
 		// sync all file groups
 		for _, group := range config.FileGroups {
+			//check if file group is valid 
+
 			go Sync(group)
 		}
 	}
