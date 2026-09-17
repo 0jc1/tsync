@@ -48,15 +48,15 @@ func Sync(fg FileGroup) {
 	policy := fg.Policy
 	source, err := os.OpenFile(fg.Source, os.O_RDWR, 0644)
 	
+	var newestFile *os.File
+	var newestModTime time.Time
+	
 	if err != nil && policy == "source_wins" {
 		fmt.Println(err)
 		fmt.Println("Cannot sync file group without source")
 		trace()
 		return
 	} 
-
-	var newestFile *os.File
-	var newestModTime time.Time
 
 	for _, file_path := range fg.Files {
 		file, err := os.OpenFile(file_path, os.O_RDWR, 0644)
@@ -141,7 +141,6 @@ func Sync(fg FileGroup) {
 
 func main() {
 	args := os.Args
-
 	fmt.Println("Program", args[0])
 	fmt.Println("Args:", args[1:])
 
@@ -149,7 +148,7 @@ func main() {
 	defer ticker.Stop()
 	for range ticker.C {
 		// fires every interval
-		
+
 		config, err := Load("config.json")
 		if err != nil {
 			fmt.Println("Failed to load config", err)
@@ -162,6 +161,10 @@ func main() {
 		// sync all file groups
 		for _, group := range config.FileGroups {
 			//check if file group is valid 
+			if len(group.Files) == 0 {
+				fmt.Println("Invalid group: No file_paths in group")
+				continue
+			}
 
 			go Sync(group)
 		}
