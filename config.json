@@ -2,11 +2,12 @@
     "refresh_interval": 1,
     "file_groups": [
         {
-            "source_file_path": "test1.txt",
+            "source_file_path": "",
             "file_paths": [
-                "test2.txt"
+                "test2.txt",
+                "test1.txt"
             ],
-            "policy": "source_wins"
+            "policy": "newest_wins"
         }
     ]
 }

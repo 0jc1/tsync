@@ -48,19 +48,30 @@ func Sync(fg FileGroup) {
 	policy := fg.Policy
 	source, err := os.OpenFile(fg.Source, os.O_RDWR, 0644)
 	
-	if err != nil  {
+	if err != nil && policy == "source_wins" {
 		fmt.Println(err)
 		fmt.Println("Cannot sync file group without source")
 		trace()
 		return
 	} 
 
+	var newestFile *os.File
+	var newestModTime time.Time
+
 	for _, file_path := range fg.Files {
-		file, err := os.OpenFile(file_path, os.O_RDWR,0644)
+		file, err := os.OpenFile(file_path, os.O_RDWR, 0644)
 		if err != nil {
 			log.Println("err", err)
 			trace()
 		}
+
+		if info, err := file.Stat(); err == nil {
+			if info.ModTime().After(newestModTime) {
+				newestModTime = info.ModTime()
+				newestFile = file 
+			}
+		}
+		
 		files = append(files, file)
 	}
 
@@ -74,8 +85,8 @@ func Sync(fg FileGroup) {
 
 		for _, file := range files {
 			info, err := file.Stat()
+			defer file.Close()
 			if err != nil {
-				file.Close()
 				fmt.Println(err)
 				trace()
 				continue
@@ -93,18 +104,39 @@ func Sync(fg FileGroup) {
 					fmt.Println("copied")
 				}
 			}
-
-			// if info.ModTime().Before(source_info.ModTime()) {
-			// 	fmt.Printf("%s modtime before source\n", file.Name())
-			// } 
-
-			file.Close()
 		}
 		source.Close()
 	} else if policy == "newest_wins" {
+		newest_info, err := newestFile.Stat()
+		if err != nil {
+			fmt.Println(err)
+			trace()
+			return
+		}
 
+		for _, file := range files {
+			info, err := file.Stat()
+			defer file.Close()
+			if err != nil {
+				fmt.Println(err)
+				trace()
+				continue
+			}
+
+			if info.ModTime().Before(newestModTime) && info.Size() != newest_info.Size() {
+				fmt.Printf("%s modtime before newest\n", file.Name())
+				file.Truncate(0)
+
+				_, err := io.Copy(file, newestFile)
+				if err != nil {
+					fmt.Println(err)
+					trace()
+				} else {
+					fmt.Println("copied")
+				}
+			} 			
+		}
 	}
-	
 }
 
 func main() {
@@ -117,7 +149,7 @@ func main() {
 	defer ticker.Stop()
 	for range ticker.C {
 		// fires every interval
-
+		
 		config, err := Load("config.json")
 		if err != nil {
 			fmt.Println("Failed to load config", err)
